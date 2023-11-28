@@ -505,7 +505,13 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
         kwargs.pop('passage_query_delimiter', None)
         self.passage_delimiter = passage_delimiter
         self.passage_query_delimiter = passage_query_delimiter
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            normal_split_keys=['input_ids', 'attention_mask'],
+            list_split_keys=['labels', 'answer_indices'],
+            dont_split_keys=['mode'],
+            *args,
+            **kwargs
+            )
 
     def _construct_context(self, sample: dict, preceding_text: str = '', add_answer: bool = False):
         """
@@ -555,7 +561,6 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
         """
         batch = {
             'input_ids': [],
-            'continuation_indices': [],
             'mode': 'icl_task',
             'labels': [],
             'answer_indices': []
