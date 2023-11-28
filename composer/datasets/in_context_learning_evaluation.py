@@ -1389,7 +1389,7 @@ def build_icl_dataloader(
             temperature=temperature,
         )
         effective_batchsize = batch_size
-    elif icl_task_type == 'rag':
+    elif icl_task_type == 'rag_generation':
         dataset = InContextLearningRAGGenerationTaskDataset(
             dataset_uri=dataset_uri,
             tokenizer=tokenizer,
