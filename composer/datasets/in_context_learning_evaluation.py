@@ -35,7 +35,6 @@ def _check_if_huggingface_uri(uri: str) -> bool:
     """
     Takes a dataset uri and checks if it's a HuggingFace dataset uri.
     Returns False if a backend uri is present (ie 's3://', 'oci://') or if the uri is a local file.
-    Returns True otherwise.
     Args:
         uri (str): uri as a string
 
@@ -43,16 +42,16 @@ def _check_if_huggingface_uri(uri: str) -> bool:
         bool: result of parsing uri as a HF uri
     """
     backend, _, path = parse_uri(uri)
+    # If there's any backend, it's a cloud OCI and not HF
     if backend == '':
         _, ext = os.path.splitext(path)
         # If there's any extension, it's a link to a local file. If no extention, HF path
         return ext == ''
-    # If there's any backend, it's a cloud OCI and not HF
     return False
 
 
-def strip_data(sample: Dict) -> Dict:
-    return {k: v.strip() if isinstance(v, str) else v for k, v in sample.items()}
+def strip_data(example: Dict) -> Dict:
+    return {k: v.strip() if isinstance(v, str) else v for k, v in example.items()}
 
 
 def _tokenizer_needs_prefix_space(tokenizer: transformers.PreTrainedTokenizerBase) -> bool:
@@ -110,14 +109,14 @@ def _make_padded_input(context_enc: List,
     return inp, continuation_span
 
 
-def _get_fewshot_sample_idxs(dataset_size: int, num_fewshot: int, sample_idx: int, rng: random.Random) -> List[int]:
+def _get_fewshot_sample_idxs(dataset_size: int, num_fewshot: int, example_idx: int, rng: random.Random) -> List[int]:
     """
-    Samples without replacement. If num_fewshot exceeds the number of unique samples,
+    Samples indices without replacement. If num_fewshot exceeds the number of unique examples in the dataset,
     then we will have fewer than num_fewshot examples in context.
     Args:
         dataset_size (int): length of the dataset
         num_fewshot (int): number of examples to prepend
-        sample_idx (int): current sample index (excluded from fewshot choices)
+        example_idx (int): current example's index (excluded from fewshot choices)
         rng (random.Random): rng for repeatable sample selection
 
     Returns:
@@ -126,13 +125,13 @@ def _get_fewshot_sample_idxs(dataset_size: int, num_fewshot: int, sample_idx: in
     num_fewshot = min(dataset_size - 1, num_fewshot)
     fewshot_idxs = set(rng.sample(range(0, dataset_size), num_fewshot))
 
-    if sample_idx in fewshot_idxs:
-        fewshot_idxs.remove(sample_idx)
+    if example_idx in fewshot_idxs:
+        fewshot_idxs.remove(example_idx)
         if len(fewshot_idxs) >= dataset_size - 1:
             return fewshot_idxs
 
         replacement_sample = rng.choice(range(0, dataset_size))
-        while replacement_sample in fewshot_idxs or replacement_sample == sample_idx:
+        while replacement_sample in fewshot_idxs or replacement_sample == example_idx:
             replacement_sample = rng.choice(range(0, dataset_size))
         fewshot_idxs.add(replacement_sample)
     return fewshot_idxs
@@ -192,7 +191,9 @@ class InContextLearningDataset(Dataset):
                  stacked_keys: List[str] = None,
                  dont_split_keys: List[str] = None,
                  list_split_keys: List[str] = None,
-                 normal_split_keys: List[str] = None):
+                 normal_split_keys: List[str] = None,
+                 ):
+        
         self.tokenizer = tokenizer
         self.prefix_space = _tokenizer_needs_prefix_space(self.tokenizer)
 
@@ -200,8 +201,8 @@ class InContextLearningDataset(Dataset):
         self.pad_tok_id = pad_tok_id
         self.num_fewshot = num_fewshot
         # TODO: check this is correct for all dataset types
+        # TODO: change how this is set, using default is unintuitive rn
         self.padding_side = 'left'
-
         self.prelimiter = prelimiter
         self.example_delimiter = example_delimiter
         self.continuation_delimiter = continuation_delimiter
@@ -219,7 +220,7 @@ class InContextLearningDataset(Dataset):
             self.dataset = self.dataset.map(strip_data)
 
         fewshot_rng = random.Random(fewshot_random_seed)
-        self.encoded_dataset = self.dataset.map(
+        self.dataset = self.dataset.map(
             self._prep_example,
             with_indices=True,
             fn_kwargs={
@@ -230,10 +231,10 @@ class InContextLearningDataset(Dataset):
         )
 
     def __getitem__(self, index: int) -> Dict:
-        return self.encoded_dataset[index]
+        return self.dataset[index]
 
     def __len__(self) -> int:
-        return len(self.encoded_dataset)
+        return len(self.dataset)
 
     def get_num_samples_in_batch(self, batch: Dict) -> int:
         return batch['input_ids'].shape[0]
@@ -287,20 +288,20 @@ class InContextLearningDataset(Dataset):
     def _generate_few_shot_text(
         self,
         num_fewshot: int,
-        sample_idx: int,
+        example_idx: int,
         preamble: str,
         fewshot_rng: random.Random,
     ) -> str:
         """
-        Formats the prompt fewshot examples for test sample `sample_idx`.
+        Formats the fewshot prompt for test example `example_idx`.
 
-        Randomly select `num_fewshot` samples from the dataset (not including the sample at `sample_idx`) and constructs
-        a context with its answer appended.
+        Randomly select `num_fewshot` samples from the dataset (excluding the example at `example_idx`) and constructs
+        contextes with answers appended.
 
-        Returns the formatted prompt_string + concatenated list of formatted few shot examples.
+        Returns the formatted prompt_string + concatenated list of formatted few shot examples as a string.
         Args:
             num_fewshot (int): number of examples to prepend
-            sample_idx (int): current sample idx
+            example_idx (int): current example idx
             preamble (str): text to occur at the beginning of the task. Generally instructions or a prompt.
             fewshot_rng (random.Random): seeded sampler to chose samples with
 
@@ -310,46 +311,46 @@ class InContextLearningDataset(Dataset):
         few_shot_text = preamble
 
         if num_fewshot > 0:
-            fewshot_idxs = _get_fewshot_sample_idxs(len(self.dataset), num_fewshot, sample_idx, fewshot_rng)
+            fewshot_idxs = _get_fewshot_sample_idxs(len(self.dataset), num_fewshot, example_idx, fewshot_rng)
             for fewshot_idx in fewshot_idxs:
                 ctxt = self._construct_context(self.dataset[fewshot_idx], few_shot_text, add_answer=True)
                 few_shot_text += ctxt
 
         return few_shot_text
 
-    def _construct_context(self, sample: Dict, preceding_text: str = '', add_answer: bool = False) -> str:
+    def _construct_context(self, example: Dict, preceding_text: str = '', add_answer: bool = False) -> str:
         """
-        Takes a sample and constructs a context. Optionally adds the correct answer (for fewshot examples)
-        and handle exmple delemiters
+        Takes an example and constructs a context. Optionally adds the correct answer (for fewshot examples)
+        and handles example delemiters
 
         Args:
-            sample (Dict): the sample from which to construct the context
+            example (Dict): the example from which to construct the context
             preceding_text (str): any preceding text, used as a check for prepending self.example_delimiter
             add_answer (bool): bool for whether or not to add the answer on the end of the context (e.g. for fewshot examples)
 
         Returns:
             str: The constructed context. The default output context is
-                 formatted as follows: f'{self.prelimiter}{sample[self.context_key]}{self.continuation_delimiter}'
+                 formatted as follows: f'{self.prelimiter}{example[self.context_key]}{self.continuation_delimiter}'
         """
-        ctxt = sample[self.context_key]
+        ctxt = example[self.context_key]
         ctxt = f'{self.prelimiter}{ctxt}'
         if len(preceding_text) > 0:
             ctxt = f'{self.example_delimiter}{ctxt}'
         ctxt = f'{ctxt}{self.continuation_delimiter}'
         if add_answer:
-            ctxt = f'{ctxt}{self._get_answer_from_sample(sample)}'
+            ctxt = f'{ctxt}{self._get_answer_from_example(example)}'
         return ctxt
 
-    def _get_answer_from_sample(self, sample: Dict[str, Any]) -> str:
+    def _get_answer_from_example(self, example: Dict[str, Any]) -> str:
         """
-        Returns the answer from the sample
+        Returns the answer from the example 
         Args:
-            sample (Dict): the sample from which to retrieve the answer
+            example (Dict): the example from which to retrieve the answer
 
         Returns:
-            str: the answer in the sample
+            str: the answer in the example 
         """
-        return sample[self.answer_key]
+        return example[self.answer_key]
 
     def _fix_eos_on_preamble(self, input_ids: List[int]) -> List[int]:
         """
@@ -485,6 +486,7 @@ class InContextLearningDataset(Dataset):
         return [{k: v[idx] for k, v in chunked.items()} for idx in range(num_chunks)]
 
 
+# TODO: write tests for this class
 class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
     """A dataset that construct batches for in-context learning RAG generation evaluation
     Rag generation tasks evaluate a model's ability to answer questions based on passages.
@@ -513,23 +515,24 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
             **kwargs
             )
 
-    def _construct_context(self, sample: dict, preceding_text: str = '', add_answer: bool = False):
+    def _construct_context(self, example: dict, preceding_text: str = '', add_answer: bool = False):
         """
-        Takes a sample and constructs a context. Optionally, appends this to preceeding text (such as a
+        Takes a example and constructs a context. Optionally, appends this to preceeding text (such as a
         prompt or fewshot examples), as well as optionally adds the correct answer (for fewshot examples)
 
         Args:
-            sample (dict): the sample from which to construct the context
+            example (dict): the example from which to construct the context
             preceding_text (str): any preceding text, needed to if self.example_delimiter is needed at the beginning
             add_answer (bool): bool for whether or not to add the answer on the end of the context (needed for fewshot examples)
 
         Returns:
             str: The constructed context. The default output context is
-                 formatted as follows: f'{self.prelimiter}{sample['self.passages_key']}{sample[self.context_key]}{self.continuation_delimiter}'
+                 formatted as follows: f'{self.prelimiter}{example['self.passages_key']}{example[self.context_key]}{self.continuation_delimiter}'
         """
         passages = self.passage_delimiter.lstrip('\n ')
-        passages += f'{self.passage_delimiter}'.join(sample['passages'])
-        query = sample['query']
+        passages += f'{self.passage_delimiter}'.join(example['passages'])
+        query = example['query']
+        # TODO: add few_shot capabilities
         context = f'{self.prelimiter}{passages}{self.passage_query_delimiter}{query}'
         return context
 
@@ -625,19 +628,19 @@ class InContextLearningQATaskDataset(InContextLearningDataset):
                 'chain_of_thought': examples.get('chain_of_thought', ''),
             })
 
-    def _get_answer_from_sample(self, sample: Dict) -> str:
+    def _get_answer_from_example(self, example: Dict) -> str:
         """
-        Returns the answer from the sample. Applies chain of thought if self.has_cot is marked as true.
+        Returns the answer from the example. Applies chain of thought if self.has_cot is marked as true.
         Args:
-            sample (Dict): the sample from which to retrieve the answer
+            example (Dict): the example from which to retrieve the answer
 
         Returns:
-            str: the answer in from the sample with chain of thought and delimiter if needed
+            str: the answer in from the example with chain of thought and delimiter if needed
         """
         if self.has_cot:
-            return f'{sample["chain_of_thought"]}{self.cot_delimiter}{sample[self.answer_key]}'
+            return f'{example["chain_of_thought"]}{self.cot_delimiter}{example[self.answer_key]}'
         else:
-            return sample[self.answer_key]
+            return example[self.answer_key]
 
     def _tokenize_example(self, prompt_and_fewshot: str, ctxt: str, example: Dict) -> Dict[str, Any]:
         """
@@ -662,11 +665,11 @@ class InContextLearningQATaskDataset(InContextLearningDataset):
             int: the maximum answer length with an additional buffer of {_MAX_ANSWER_BUFFER_LENGTH} if chain of thought is present
         """
         max_answer_length = 0
-        for sample in self.dataset:
-            all_answers = [sample[self.answer_key]] + list(sample.get('aliases', []))
+        for example in self.dataset:
+            all_answers = [example[self.answer_key]] + list(example.get('aliases', []))
             for answer in all_answers:
                 if self.has_cot:
-                    response = (f'{sample["chain_of_thought"]}{self.cot_delimiter}{answer}')
+                    response = (f'{example["chain_of_thought"]}{self.cot_delimiter}{answer}')
                 else:
                     response = answer
                 max_answer_length = max(max_answer_length, len(self.tokenizer(response)['input_ids']))
@@ -693,9 +696,9 @@ class InContextLearningQATaskDataset(InContextLearningDataset):
                 'use_cache': True
             },
         }
-        for sample in data:
-            aliases = sample['aliases']
-            context_enc = sample['preamble']['input_ids'] + sample['context']['input_ids']
+        for example in data:
+            aliases = example['aliases']
+            context_enc = example['preamble']['input_ids'] + example['context']['input_ids']
             inp, _ = _make_padded_input(
                 context_enc,
                 [],
@@ -804,17 +807,17 @@ class InContextLearningMultipleChoiceTaskDataset(InContextLearningDataset):
         self.num_choices = len(self.dataset[0][choices_key])
         self.real_split_keys = ['input_ids', 'labels', 'attention_mask']
 
-    def _get_answer_from_sample(self, sample: Dict) -> str:
+    def _get_answer_from_example(self, example: Dict) -> str:
         """
-        Returns the correct answer from the sample's choices.
+        Returns the correct answer from the example's choices.
         Args:
-            sample (Dict): the sample from which to retrieve the answer
+            example (Dict): the example from which to retrieve the answer
 
         Returns:
             str: the full string of the correct answer based on the 'gold' key
         """
-        choices = sample['choices']
-        gold_idx = sample['gold']
+        choices = example['choices']
+        gold_idx = example['gold']
         return choices[gold_idx]
 
     def _tokenize_example(self, prompt_and_fewshot: str, ctxt: str, example: Dict) -> Dict[str, Any]:
@@ -889,9 +892,9 @@ class InContextLearningMultipleChoiceTaskDataset(InContextLearningDataset):
         Split batch while ensuring all continuations are in the same microbatch.
 
         In ICL Multiple Choice, we duplicate each data point for each possible continuation.
-        When splitting a batch, we have logical samples, which refer to one possible question,
-        and real samples, which refers to one possible continuation. As sample count and
-        microbatch_size are tracked in logical samples, we split logical attributes by
+        When splitting a batch, we have logical example, which refer to one possible question,
+        and real example, which refers to one possible continuation. As example count and
+        microbatch_size are tracked in logical example, we split logical attributes by
         microbatch_size and real attributes by microbatch_size * num_choices.
         Args:
             batch (Dict): batch of data
@@ -953,12 +956,12 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
     def __init__(self, choices_key='context_options', *args, **kwargs):
         super().__init__(choices_key=choices_key, *args, **kwargs)
 
-    def _construct_context(self, sample, preceding_text: str = '', add_answer: bool = False) -> str:
+    def _construct_context(self, example, preceding_text: str = '', add_answer: bool = False) -> str:
         """
-        Takes a sample and constructs a context with the correct context for the sample's continuation.
+        Takes a example and constructs a context with the correct context for the example's continuation.
 
         Args:
-            sample (Dict): the sample from which to construct the context
+            example (Dict): the example from which to construct the context
             preceding_text (str): any preceding text, needed to if self.example_delimiter is needed at the beginning
             add_answer (bool): this will always be true when calling this function for SchemaTaskDataset
 
@@ -966,28 +969,28 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
             str: the single correct context for a given continuation
 
         """
-        context_options = sample['context_options']
-        gold_idx = sample['gold']
-        continuation = sample['continuation']
+        context_options = example['context_options']
+        gold_idx = example['gold']
+        continuation = example['continuation']
         context = context_options[gold_idx]
         if len(preceding_text) > 0:
             context = f'{self.example_delimiter}{context}'
         context = f'{context}{self.continuation_delimiter}{continuation}'
         return context
 
-    def _construct_multiple_contexts(self, sample: Dict, preceding_text: str = '') -> str:
+    def _construct_multiple_contexts(self, example: Dict, preceding_text: str = '') -> str:
         """
-        Takes a sample and constructs all contexts. Optionally, appends this to preceeding text (such as a
+        Takes a example and constructs all contexts. Optionally, appends this to preceeding text (such as a
         prompt or fewshot examples).
 
         Args:
-            sample (Dict): the sample from which to construct the context
+            example (Dict): the example from which to construct the context
             preceding_text (str): any preceding text, needed to if self.example_delimiter is needed at the beginning
 
         Returns:
-            list: all context options for the selected sample with formatting
+            list: all context options for the selected example with formatting
         """
-        context_options = sample['context_options']
+        context_options = example['context_options']
         if len(preceding_text) > 0:
             if self.strip_data:
                 cont_del = self.continuation_delimiter.rstrip()
@@ -1115,7 +1118,6 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
     - mode: always set to 'generate'
     - labels: exact solution for the coding problem
     - prompts: prompt for the task
-    - cannonical_solutions: exact solutions
     - entry_points: list of entry points
     - test_inputs: list of test inputs
     - test_outputs: list of test outputs
@@ -1171,7 +1173,7 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
             dont_split_keys=['mode', 'generation_length', 'pass_at_k', 'generation_kwargs'],
             normal_split_keys=['input_ids', 'attention_mask'],
             list_split_keys=[
-                'labels', 'tests', 'canonical_solutions', 'entry_points', 'test_inputs', 'test_outputs', 'prompts',
+                'labels', 'tests', 'entry_points', 'test_inputs', 'test_outputs', 'prompts',
                 'languages'
             ],
             *args,
@@ -1191,10 +1193,10 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
             int: maximum prompt length
         """
         max_prompt_length = 0
-        for sample in self.encoded_dataset:
+        for example in self.dataset:
             max_prompt_length = max(
                 max_prompt_length,
-                len(sample['preamble']['input_ids'] + sample['context']['input_ids']),
+                len(example['preamble']['input_ids'] + example['context']['input_ids']),
             )
         return max_prompt_length
 
@@ -1235,7 +1237,6 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
             'labels': [],
             'prompts': [],  # list of prompts
             'tests': [],  # list of tests
-            'canonical_solutions': [],  # list of solutions
             'entry_points': [],  # list of entry points
             'test_inputs': [],  # list of test inputs
             'test_outputs': [],  # list of test outputs
@@ -1254,8 +1255,8 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
                 'use_cache': True
             },
         }
-        for sample in data:
-            context_enc = sample['preamble']['input_ids'] + sample['context']['input_ids']
+        for example in data:
+            context_enc = example['preamble']['input_ids'] + example['context']['input_ids']
             inp, _ = _make_padded_input(
                 context_enc,
                 [],
@@ -1265,15 +1266,13 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
             )
 
             batch['input_ids'].append(inp)
-            batch['canonical_solutions'].append(sample['canonical_solution'])
-            batch['prompts'].append(sample['prompt_text'])
-            batch['tests'].append(sample['test'])
-            # TODO: why use this twice?
-            batch['labels'].append(sample['canonical_solution'])
-            batch['entry_points'].append(sample['entry_point'])
-            batch['test_inputs'].append(sample['test_inputs'])
-            batch['test_outputs'].append(sample['test_outputs'])
-            batch['languages'].append(sample['language'])
+            batch['prompts'].append(example['prompt_text'])
+            batch['tests'].append(example['test'])
+            batch['labels'].append(example['canonical_solution'])
+            batch['entry_points'].append(example['entry_point'])
+            batch['test_inputs'].append(example['test_inputs'])
+            batch['test_outputs'].append(example['test_outputs'])
+            batch['languages'].append(example['language'])
 
         batch = {k: torch.stack(v) if k in self.stacked_keys else v for k, v in batch.items()}
         batch['attention_mask'] = ~(batch['input_ids'] == self.pad_tok_id)
