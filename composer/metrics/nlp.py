@@ -643,6 +643,7 @@ class InContextLearningCodeEvalAccuracy(InContextLearningMetric):
         assert isinstance(self.total, Tensor)
         return self.correct / self.total
 
+
 class InContextLearningRAGGenerationAccuracy(InContextLearningMetric):
     r"""Computes accuracy for In-context learning (ICL) language modeling (LM) tasks.
 
@@ -674,11 +675,11 @@ class InContextLearningRAGGenerationAccuracy(InContextLearningMetric):
         self.add_state('total', default=torch.tensor(0.), dist_reduce_fx='sum')
 
     def update(self, batch: dict, output_logits: torch.Tensor, labels: torch.Tensor):
-        for batch_idx, cont_idx in enumerate(batch['answer_indices']):
-            cont_tok_pred = output_logits[batch_idx].index_select(dim=0, index=cont_idx - 1).argmax(dim=-1)
-            cont_tok_targ = labels[batch_idx].index_select(dim=0, index=cont_idx - 1)
+        for batch_idx, answer_idx in enumerate(batch['answer_indices']):
+            answer_tok_pred = output_logits[batch_idx].index_select(dim=0, index=answer_idx - 1).argmax(dim=-1)
+            answer_tok_targ = labels[batch_idx].index_select(dim=0, index=answer_idx - 1)
 
-            self.correct += (cont_tok_pred == cont_tok_targ).all().int()
+            self.correct += (answer_tok_pred == answer_tok_targ).all().int()
             self.total += torch.tensor(1.0)
 
     def compute(self):
