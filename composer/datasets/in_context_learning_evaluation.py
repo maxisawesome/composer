@@ -532,8 +532,13 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
         passages = self.passage_delimiter.lstrip('\n ')
         passages += f'{self.passage_delimiter}'.join(example['passages'])
         query = example['query']
-        # TODO: add few_shot capabilities
         context = f'{self.prelimiter}{passages}{self.passage_query_delimiter}{query}'
+
+        if len(preceding_text) > 0:
+            context = f'{self.example_delimiter}{context}'
+        context = f'{context}{self.continuation_delimiter}'
+        if add_answer:
+            context = f'{context}{self._get_answer_from_example(example)}'
         return context
 
     def _tokenize_example(self, prompt_and_fewshot: str, ctxt: str, example: dict):
