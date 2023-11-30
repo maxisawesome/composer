@@ -686,4 +686,3 @@ class InContextLearningRAGGenerationAccuracy(InContextLearningMetric):
         assert isinstance(self.correct, Tensor)
         assert isinstance(self.total, Tensor)
         return self.correct / self.total
-
