@@ -15,9 +15,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from composer import Evaluator
 from composer.core import DataSpec
-from composer.datasets.in_context_learning_evaluation import (InContextLearningCodeEvalDataset,
+from composer.datasets.in_context_learning_evaluation import (InContextLearningCodeEvalDataset, _get_continuation_span,
                                                               _get_fewshot_sample_idxs, _make_padded_input,
-                                                              get_icl_task_dataloader, _check_if_huggingface_uri)
+                                                              _trim_context, get_icl_task_dataloader)
 from composer.loggers import InMemoryLogger
 from composer.metrics import (InContextLearningCodeEvalAccuracy, InContextLearningLMAccuracy,
                               InContextLearningMultipleChoiceAccuracy, InContextLearningQAAccuracy)
@@ -67,21 +67,16 @@ def test_fewshot_sample_idxs_randomness():
 
 
 def test_batch_padding_logic(tiny_gpt2_tokenizer):
+    # def test_get_continuation_span(tiny_gpt2_tokenizer):
     continuation = tiny_gpt2_tokenizer(' dog' * 2000)['input_ids']
     context = tiny_gpt2_tokenizer(' cat' * 2000)['input_ids']
-    _, continuation_spans = _make_padded_input(context, continuation, 2048, tiny_gpt2_tokenizer.eos_token_id)
+    trimmed_context = _trim_context(context, continuation, 2048)
+    continuation_spans = _get_continuation_span(trimmed_context, continuation)
+    # TODO is this correct? Add more tests
+    # padded_input = _get_continuation_span(trimmed_context, continuation)
     # the context (of len 2000) gets clipped to len 48 so that the whole continuation can fit
     assert continuation_spans[0] == 48 and continuation_spans[-1] == 2047
 
-
-@pytest.mark.parametrize('uri', ['tests/datasets/local_data/hellaswag_small.jsonl', 's3://oci/url/link.json', 'gcs://blah/blah.json'])
-def test_check_if_huggingface_uri_when_not_hf_uri(uri):
-    assert not _check_if_huggingface_uri(uri)
-
-
-@pytest.mark.parametrize('uri', ['L4NLP/LEval', 'mosaicml/instruct-v3'])
-def test_check_if_huggingface_uri_when_hf_uri(uri):
-    assert _check_if_huggingface_uri(uri)
 
 @pytest.mark.parametrize('padding_side', ['left', 'right', 'middle'])
 def test_make_padding(tiny_gpt2_tokenizer, padding_side):
@@ -91,7 +86,7 @@ def test_make_padding(tiny_gpt2_tokenizer, padding_side):
     error_context = contextlib.nullcontext() if padding_side in {'left', 'right'} else pytest.raises(ValueError)
 
     with error_context:
-        input_ids, _ = _make_padded_input(context, [], 2048, padding_id, padding_side=padding_side)
+        input_ids = _make_padded_input(context, [], 2048, padding_id, padding_side=padding_side)
 
         if padding_side == 'left':
             assert input_ids[0] == tiny_gpt2_tokenizer.eos_token_id
@@ -872,7 +867,8 @@ def test_code_eval_test_cases(dataset_uri, tmp_path):
     assert any(item[0] != tokenizer.eos_token_id for item in batch['input_ids'])  # longest should be pushed left
 
     mod = types.ModuleType('test_module')
-    for prompt, solution, inputs, outputs, entry_point in zip(batch['prompts'], batch['labels'], batch['test_inputs'], batch['test_outputs'], batch['entry_points']):
+    for prompt, solution, inputs, outputs, entry_point in zip(batch['prompts'], batch['labels'], batch['test_inputs'],
+                                                              batch['test_outputs'], batch['entry_points']):
         exec(prompt + solution, mod.__dict__)
         for test_input, test_output in zip(inputs, outputs):
             result = mod.__dict__[entry_point](*eval(test_input))
@@ -1082,7 +1078,8 @@ def test_schema_task_evaluation(num_fewshot, dataset_uri, tiny_gpt2_tokenizer, t
 @pytest.mark.filterwarnings(r'ignore:Cannot split .* of length.*:UserWarning')
 @device('gpu')
 @world_size(1, 2)
-def test_mc_task_evaluation_subcategories(device, world_size, dataset_uri, num_fewshot, tiny_gpt2_model, tiny_gpt2_tokenizer, tmp_path):
+def test_mc_task_evaluation_subcategories(device, world_size, dataset_uri, num_fewshot, tiny_gpt2_model,
+                                          tiny_gpt2_tokenizer, tmp_path):
     pytest.importorskip('datasets')
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
     local_data = os.path.join(os.path.dirname(__file__), 'local_data')
@@ -1134,7 +1131,8 @@ def test_mc_task_evaluation_subcategories(device, world_size, dataset_uri, num_f
 @pytest.mark.parametrize('num_fewshot', [0, 5])
 @device('gpu')
 @world_size(1, 2)
-def test_mc_task_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tmp_path, tiny_gpt2_model):
+def test_mc_task_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tmp_path,
+                            tiny_gpt2_model):
     pytest.importorskip('datasets')
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
     local_data = os.path.join(os.path.dirname(__file__), 'local_data')
@@ -1266,7 +1264,8 @@ def test_qa_task_evaluation_with_cot_opt_tokenizer(device, world_size, num_fewsh
 @pytest.mark.parametrize('num_fewshot', [0, 5])
 @device('gpu')
 @world_size(1, 2)
-def test_qa_task_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tiny_gpt2_model, tmp_path):
+def test_qa_task_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tiny_gpt2_model,
+                            tmp_path):
     pytest.importorskip('datasets')
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
     local_data = os.path.join(os.path.dirname(__file__), 'local_data')
@@ -1308,7 +1307,8 @@ def test_qa_task_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_g
 @pytest.mark.parametrize('num_fewshot', [5])
 @device('gpu')
 @world_size(1, 2)
-def test_qa_task_with_cot_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tiny_gpt2_model, tmp_path):
+def test_qa_task_with_cot_evaluation(device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tiny_gpt2_model,
+                                     tmp_path):
     pytest.importorskip('datasets')
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
     local_data = os.path.join(os.path.dirname(__file__), 'local_data')
@@ -1364,7 +1364,8 @@ def test_code_eval_requires_valid_envvar(monkeypatch):
 @pytest.mark.parametrize('generations_per_sample', range(1, 3))
 @device('gpu')
 @world_size(1, 2)
-def test_code_eval_microbatching(monkeypatch, device, world_size, num_fewshot, dataset_uri, tmp_path, generations_per_sample):
+def test_code_eval_microbatching(monkeypatch, device, world_size, num_fewshot, dataset_uri, tmp_path,
+                                 generations_per_sample):
     pytest.importorskip('datasets')
     monkeypatch.setenv('CODE_EVAL_DEVICE', 'LOCAL')
     in_memory_logger = InMemoryLogger()  # track the logged metrics in the in_memory_logger
@@ -1413,8 +1414,8 @@ def test_code_eval_microbatching(monkeypatch, device, world_size, num_fewshot, d
 @pytest.mark.parametrize('generations_per_sample', range(1, 3))
 @device('gpu')
 @world_size(1, 2)
-def test_code_eval_sentpiece_evaluation(monkeypatch, device, world_size, num_fewshot, dataset_uri, tiny_t5_tokenizer, tiny_t5_model,
-                                        tmp_path, generations_per_sample):
+def test_code_eval_sentpiece_evaluation(monkeypatch, device, world_size, num_fewshot, dataset_uri, tiny_t5_tokenizer,
+                                        tiny_t5_model, tmp_path, generations_per_sample):
     pytest.importorskip('datasets')
     torch.cuda.empty_cache()
     monkeypatch.setenv('CODE_EVAL_DEVICE', 'LOCAL')
@@ -1461,8 +1462,8 @@ def test_code_eval_sentpiece_evaluation(monkeypatch, device, world_size, num_few
 @pytest.mark.filterwarnings(r'ignore: Input length of input_ids is')
 @device('gpu')
 @world_size(1, 2)
-def test_code_eval_task_evaluation(monkeypatch, device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer, tiny_gpt2_model,
-                                   tmp_path, generations_per_sample):
+def test_code_eval_task_evaluation(monkeypatch, device, world_size, num_fewshot, dataset_uri, tiny_gpt2_tokenizer,
+                                   tiny_gpt2_model, tmp_path, generations_per_sample):
     pytest.importorskip('datasets')
     torch.cuda.empty_cache()
     monkeypatch.setenv('CODE_EVAL_DEVICE', 'LOCAL')
@@ -1542,7 +1543,7 @@ def test_lm_spacing_dataloader(dataset_uri, tiny_gpt2_tokenizer, tmp_path):
     assert second_batch_without_last_word.count(' UNIQUE ') == 1
 
 
-@pytest.mark.parametrize('dataset_uri', ['mosaicml/test_dataset'])
+@pytest.mark.parametrize('dataset_uri', ['hf://mosaicml/test_dataset'])
 @pytest.mark.parametrize('num_fewshot', [0, 1])
 @pytest.mark.parametrize('prompt_string', ['Complete the voiceline: ', ''])
 @pytest.mark.parametrize('hf_loading_vars', [{
@@ -1586,20 +1587,19 @@ def test_hf_dataloading_lm_dataloader(dataset_uri, tiny_gpt2_tokenizer, tmp_path
     max_idx = max(batch['continuation_indices'][0]).item()
     assert tokenizer.decode(batch['input_ids'][0][min_idx:max_idx + 1]) == ' and me.'
 
-    
     decoded_batch = [tokenizer.decode(row[row != tokenizer.eos_token_id]) for row in batch['input_ids']]
     assert decoded_batch[0] == "Looks like it's just you and me."
     assert decoded_batch[1] == "There's a fine line between bravery and stupidity."
 
 
-@pytest.mark.parametrize('dataset_uri', ['mosaicml/test_dataset'])
+@pytest.mark.parametrize('dataset_uri', ['hf://mosaicml/test_dataset'])
 @pytest.mark.parametrize('num_fewshot', [0, 1])
 @pytest.mark.parametrize('prompt_string', ['What spell does this invoke? ', ''])
 @pytest.mark.parametrize('hf_loading_vars', [{
     'split': 'test',
     'name': 'invoker',
 }])
-@pytest.mark.parametrize('hf_parsing_map', [{"context":['quas','wex','exort'],"answer":['spell']}])
+@pytest.mark.parametrize('hf_parsing_map', [{'context': ['quas', 'wex', 'exort'], 'answer': ['spell']}])
 def test_hf_dataloading_custom_parsing(dataset_uri, tiny_gpt2_tokenizer, tmp_path, num_fewshot, prompt_string,
                                        hf_loading_vars, hf_parsing_map):
     pytest.importorskip('datasets')
@@ -1638,7 +1638,6 @@ def test_hf_dataloading_custom_parsing(dataset_uri, tiny_gpt2_tokenizer, tmp_pat
 
     decoded_batch = tokenizer.batch_decode(batch['input_ids'])
     assert all(item.count('Orbs: ') == num_fewshot + 1 for item in decoded_batch)
-    # import IPython; IPython.embed()
     assert all(item.count('\nSpell:') == num_fewshot + 1 for item in decoded_batch)
 
     if len(prompt_string) > 0:
