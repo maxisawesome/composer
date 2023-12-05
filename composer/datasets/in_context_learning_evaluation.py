@@ -526,7 +526,13 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
         kwargs.pop('passage_query_delimiter', None)
         self.passage_delimiter = passage_delimiter
         self.passage_query_delimiter = passage_query_delimiter
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            normal_split_keys=['input_ids', 'attention_mask'],
+            list_split_keys=['labels', 'answer_indices'],
+            dont_split_keys=['mode'],
+            *args,
+            **kwargs
+            )
 
     def _construct_context(self, example: dict, preceding_text: str = '', add_answer: bool = False):
         """
@@ -545,8 +551,13 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
         passages = self.passage_delimiter.lstrip('\n ')
         passages += f'{self.passage_delimiter}'.join(example['passages'])
         query = example['query']
-        # TODO: add few_shot capabilities
         context = f'{self.prelimiter}{passages}{self.passage_query_delimiter}{query}'
+
+        if len(preceding_text) > 0:
+            context = f'{self.example_delimiter}{context}'
+        context = f'{context}{self.continuation_delimiter}'
+        if add_answer:
+            context = f'{context}{self._get_answer_from_example(example)}'
         return context
 
     def _tokenize_example(self, prompt_and_fewshot: str, ctxt: str, example: dict):
@@ -574,7 +585,12 @@ class InContextLearningRAGGenerationTaskDataset(InContextLearningDataset):
         Returns:
             dict: dictionary for a single batch
         """
-        batch = {'input_ids': [], 'continuation_indices': [], 'mode': 'icl_task', 'labels': [], 'answer_indices': []}
+        batch = {
+            'input_ids': [],
+            'mode': 'icl_task',
+            'labels': [],
+            'answer_indices': []
+            }
         for data_pair in data:
             context_enc = data_pair['context']
             answer_enc = data_pair['answer']
@@ -1318,7 +1334,7 @@ def build_icl_dataloader(
             temperature=temperature,
         )
         effective_batchsize = batch_size
-    elif icl_task_type == 'rag':
+    elif icl_task_type == 'rag_generation':
         dataset = InContextLearningRAGGenerationTaskDataset(
             dataset_uri=dataset_uri,
             tokenizer=tokenizer,
