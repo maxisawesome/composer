@@ -250,7 +250,7 @@ class InContextLearningMetric(Metric):
     ):
         # this is based off the gather_all_tensors utility function in torchmetrics, except it works with non-tensor objects
         # (in particular, lists of strings). Link here: https://github.com/Lightning-AI/torchmetrics/blob/99d6d9d6ac4eb1b3398241df558604e70521e6b0/src/torchmetrics/utilities/distributed.py#L97-L148
-        if distributed_available:
+        if should_sync:
             group = process_group or self.process_group
             world_size = torch.distributed.get_world_size(group)  # pyright: ignore [reportGeneralTypeIssues]
             torch.distributed.barrier(group=group)  # pyright: ignore [reportGeneralTypeIssues]
@@ -259,7 +259,6 @@ class InContextLearningMetric(Metric):
                 gathered_response_cache, self.response_cache)
             flattened_gathered_response_cache = [item for row in gathered_response_cache for item in row]
             setattr(self, 'response_cache', flattened_gathered_response_cache)
-
             super().sync(
                 dist_sync_fn,
                 process_group,
@@ -327,13 +326,25 @@ class InContextLearningQAAccuracy(InContextLearningMetric):
         if batch is None:
             batch = {}
         cot_delimiter = batch.get('cot_delimiter', '')
+        do_normalization = batch.get('do_normalization', True)
+        stopping_criteria = batch.get('stopping_criteria', None)
         for sample_output, sample_labels, prompt_tensor in zip(outputs, labels, batch['input_ids']):
+        
+
             final_answer = sample_output
+            if stopping_criteria is not None and len(stopping_criteria) > 0:
+                final_answer = re.split('|'.join(stopping_criteria), final_answer)[0]
+
             if cot_delimiter is not None and len(cot_delimiter) > 0:
                 final_answer = final_answer.split(cot_delimiter)[-1]
 
-            cleaned_final_answer = self.normalize_answer(final_answer)
-            cleaned_sample_labels = {self.normalize_answer(label) for label in sample_labels}
+            if do_normalization:
+                cleaned_final_answer = self.normalize_answer(final_answer)
+                cleaned_sample_labels = {self.normalize_answer(label) for label in sample_labels}
+            else:
+                cleaned_final_answer = final_answer
+                cleaned_sample_labels = set(sample_labels)
+
             correct = False
             if any(cleaned_final_answer.startswith(label) for label in cleaned_sample_labels):
                 self.correct += torch.tensor(1.0)
