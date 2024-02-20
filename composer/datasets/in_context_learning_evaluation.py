@@ -1436,19 +1436,6 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
         tokenized_example['language'] = example['language']
         return tokenized_example
 
-    def get_answer_from_example(self, example: Dict[str, Any], in_context: bool = False) -> str:
-        """
-        Returns the answer from the example.
-
-        Args:
-            example (Dict): The example from which to retrieve the answer
-
-        Returns:
-            str: The answer in the example
-        """
-        cont = example[self.answer_key]
-        return cont
-
 
 def build_icl_dataloader(
     icl_task_type: str,
