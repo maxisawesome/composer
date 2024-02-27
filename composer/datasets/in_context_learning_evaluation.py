@@ -330,8 +330,8 @@ class InContextLearningDataset(Dataset):
         hf_loading_vars = hf_loading_vars or {}
         self.dataset: HFDataset = self.read_dataset(dataset_uri, destination_path, hf_loading_vars, hf_parsing_map)
         self.strip_data = strip_dataset
-        # if self.strip_data:
-        #     self.dataset = self.dataset.map(strip_data)
+        if self.strip_data:
+            self.dataset = self.dataset.map(strip_data)
 
         fewshot_rng = random.Random(fewshot_random_seed)
         self.dataset: HFDataset = self.dataset.map(
@@ -1324,7 +1324,7 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
         super().__init__(
             context_key='prompt',
             answer_key='canonical_solution',
-            strip_dataset=True,
+            strip_dataset=False,
             static_keys=static_keys,
             list_keys=list_keys,
             tensor_keys=tensor_keys,
@@ -1426,7 +1426,7 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
         See InContextLearningDataset for more details
         """
         tokenized_example = super().tokenize_example(prompt_and_fewshot, ctxt, example)
-        tokenized_example['prompt_text'] = example['prompt']
+        tokenized_example['prompt_text'] = example['prompt'].rstrip(' ')
         tokenized_example['task_id'] = example['task_id']
         tokenized_example['canonical_solution'] = example['canonical_solution']
         tokenized_example['test'] = example['test']
