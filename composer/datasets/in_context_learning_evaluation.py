@@ -330,8 +330,8 @@ class InContextLearningDataset(Dataset):
         hf_loading_vars = hf_loading_vars or {}
         self.dataset: HFDataset = self.read_dataset(dataset_uri, destination_path, hf_loading_vars, hf_parsing_map)
         self.strip_data = strip_dataset
-        if self.strip_data:
-            self.dataset = self.dataset.map(strip_data)
+        # if self.strip_data:
+        #     self.dataset = self.dataset.map(strip_data)
 
         fewshot_rng = random.Random(fewshot_random_seed)
         self.dataset: HFDataset = self.dataset.map(
@@ -528,7 +528,7 @@ class InContextLearningDataset(Dataset):
         preamble = self._fix_eos_on_preamble(preamble)
         if self.strip_data:
             # rstrip context because a prompt ending in a space results in degenerate output
-            ctxt = ctxt.rstrip()
+            ctxt = ctxt.rstrip(' ')
         # Never add special tokens to context
         tokenized_context = self.tokenizer(ctxt, add_special_tokens=False)['input_ids']
         assert isinstance(preamble, list)
@@ -951,7 +951,7 @@ class InContextLearningMultipleChoiceTaskDataset(InContextLearningDataset):
         preamble = self._fix_eos_on_preamble(preamble)
         if self.strip_data:
             # rstrip context because a prompt ending in a space results in degenerate output
-            ctxt = ctxt.rstrip()
+            ctxt = ctxt.rstrip(' ')
         # Never add special tokens to context
         tokenized_context = self.tokenizer(ctxt, add_special_tokens=False)['input_ids']
         assert isinstance(tokenized_context, list)
@@ -1148,7 +1148,7 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
         context_options = example[self.choices_key]
         if len(preceding_text) > 0:
             if self.strip_data:
-                cont_del = self.continuation_delimiter.rstrip()
+                cont_del = self.continuation_delimiter.rstrip(' ')
             else:
                 cont_del = self.continuation_delimiter
             context_options = [f'{self.example_delimiter}{c}{cont_del}' for c in context_options]
@@ -1324,7 +1324,7 @@ class InContextLearningCodeEvalDataset(InContextLearningDataset):
         super().__init__(
             context_key='prompt',
             answer_key='canonical_solution',
-            strip_dataset=False,
+            strip_dataset=True,
             static_keys=static_keys,
             list_keys=list_keys,
             tensor_keys=tensor_keys,
