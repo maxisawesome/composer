@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import random
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
@@ -17,6 +18,8 @@ from composer.core import DataSpec
 from composer.core.data_spec import _default_split_batch, _split_list
 from composer.datasets.utils import stop_sequences_criteria
 from composer.utils import MissingConditionalImportError, dist, get_file
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import transformers
@@ -1130,7 +1133,9 @@ class InContextLearningSchemaTaskDataset(InContextLearningMultipleChoiceTaskData
         context = context_options[gold_idx]
         if len(preceding_text) > 0:
             context = f'{self.example_delimiter}{context}'
+        log.info(f'context: {context}')
         context = f'{self.prelimiter}{context}{self.continuation_delimiter}{continuation}'
+        log.info(f'context: {context}')
         return context
 
     def _construct_multiple_contexts(self, example: Dict, preceding_text: str = '') -> List[str]:
