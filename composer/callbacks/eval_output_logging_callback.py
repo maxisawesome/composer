@@ -13,6 +13,9 @@ from composer.core import Callback, State
 from composer.loggers import ConsoleLogger, Logger
 from composer.utils.dist import all_gather_object
 
+import logging
+log = logging.getLogger(__name__)
+
 
 class EvalOutputLogging(Callback):
     """Logs eval outputs for each sample of each ICL evaluation dataset.
@@ -42,6 +45,7 @@ class EvalOutputLogging(Callback):
         assert state.outputs is not None
         assert state.metric_outputs is not None
         logging_dict: Dict[str, Union[List[Any], torch.Tensor, Sequence[torch.Tensor]]] = deepcopy(state.metric_outputs)
+        log.info(f"recieved logging_dict: {logging_dict}")
 
         # If batch mode is not generate, outputs will be logits
         if state.batch['mode'] == 'generate':
@@ -93,13 +97,16 @@ class EvalOutputLogging(Callback):
         # columns = {"a", "b"}, rows = [["1a", "1b"], ["2a", "2b"]]
         columns = list(logging_dict.keys())
         rows = [list(item) for item in zip(*logging_dict.values())]
+        log.info("cols and rows:")
+        log.info(columns)
+        log.info(rows)
 
         assert state.dataloader_label is not None
         if not self.name:
             # If only running eval, step will be 0
             # If running training, step will be current training step
             step = state.timestamp.batch.value
-            self.name = f'{state.dataloader_label}_step_{step}'
+            self.name = f'{state.dataloader_label}_step_{step}_test'
             self.columns = columns
         self.rows.extend(rows)
 
