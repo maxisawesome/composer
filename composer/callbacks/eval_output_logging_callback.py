@@ -3,7 +3,6 @@
 
 """Log model outputs and expected outputs during ICL evaluation."""
 
-import logging
 import warnings
 from copy import deepcopy
 from typing import Any, Dict, List, Sequence, Union
@@ -14,7 +13,6 @@ from composer.core import Callback, State
 from composer.loggers import ConsoleLogger, Logger
 from composer.utils.dist import all_gather_object
 
-log = logging.getLogger(__name__)
 
 
 class EvalOutputLogging(Callback):
@@ -45,7 +43,6 @@ class EvalOutputLogging(Callback):
         assert state.outputs is not None
         assert state.metric_outputs is not None
         logging_dict: Dict[str, Union[List[Any], torch.Tensor, Sequence[torch.Tensor]]] = deepcopy(state.metric_outputs)
-        log.info(f'recieved logging_dict: {logging_dict}')
 
         # If batch mode is not generate, outputs will be logits
         if state.batch['mode'] == 'generate':
@@ -97,9 +94,6 @@ class EvalOutputLogging(Callback):
         # columns = {"a", "b"}, rows = [["1a", "1b"], ["2a", "2b"]]
         columns = list(logging_dict.keys())
         rows = [list(item) for item in zip(*logging_dict.values())]
-        log.info('cols and rows:')
-        log.info(columns)
-        log.info(rows)
 
         assert state.dataloader_label is not None
         if not self.name:
