@@ -100,7 +100,8 @@ class EvalOutputLogging(Callback):
             # If only running eval, step will be 0
             # If running training, step will be current training step
             step = state.timestamp.batch.value
-            self.name = f'{state.dataloader_label}_step_{step}'
+            # TODO: added run_name bcus of weird wandb behavior
+            self.name = f'{state.dataloader_label}_step_{step}_{logging_dict["metric_name"][0]}_{state.run_name}'
             self.columns = columns
         self.rows.extend(rows)
 
