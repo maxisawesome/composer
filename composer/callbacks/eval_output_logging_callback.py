@@ -101,7 +101,11 @@ class EvalOutputLogging(Callback):
             # If running training, step will be current training step
             step = state.timestamp.batch.value
             # TODO: added run_name bcus of weird wandb behavior
-            self.name = f'{state.dataloader_label}_step_{step}_{logging_dict["metric_name"][0]}_{state.run_name}'
+            if "metric_name" in logging_dict:
+                metric_name = logging_dict["metric_name"][0]
+            else:
+                metric_name = "using_api"
+            self.name = f'{state.dataloader_label}_step_{step}_{metric_name}_{state.run_name}'
             self.columns = columns
         self.rows.extend(rows)
 
