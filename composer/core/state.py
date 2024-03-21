@@ -665,7 +665,12 @@ class State(Serializable):
         The current batch of training will finish, and any scheduled evaluation,
         logging, and evaluation for that batch, as well as any epoch end events.
         """
-        self.max_duration = self.timestamp.batch
+        # Set the max_duration to the current time in its unit, except if the unit is TimeUnit.EPOCH. This is because TimeUnit.EPOCH is a very crude way to measure max duration. For example, it will result in division by zero error while computing get_elapsed_duration: https://github.com/mosaicml/composer/blob/1b9c6d3c0592183b947fd89890de0832366e33a7/composer/core/state.py#L641
+        if self.max_duration is not None and Time.from_input(self.max_duration,).unit != TimeUnit.EPOCH:
+            max_duration_unit = Time.from_input(self.max_duration).unit
+            self.max_duration = self.timestamp.get(max_duration_unit)
+        else:
+            self.max_duration = self.timestamp.batch
 
     @property
     def optimizers(self):
@@ -783,14 +788,6 @@ class State(Serializable):
     @property
     def fsdp_sharded_state_dict_enabled(self):
         return self.fsdp_config is not None and self.fsdp_enabled and self.fsdp_state_dict_type == 'sharded'
-
-    @property
-    def fsdp_elastic_sharded_enabled(self):
-        warnings.warn(
-            'state.fsdp_elastic_sharded_enabled is deprecated and will be removed v0.21.0',
-            DeprecationWarning,
-        )
-        return self.fsdp_sharded_state_dict_enabled
 
     @property
     def fsdp_device_mesh(self):

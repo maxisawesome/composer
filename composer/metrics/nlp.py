@@ -20,6 +20,7 @@ from torchmetrics import Metric
 
 from composer.utils import dist
 from composer.utils.eval_client import EvalClient, LambdaEvalClient, LocalEvalClient, MosaicMLLambdaEvalClient
+from composer.utils.warnings import VersionedDeprecationWarning
 
 log = logging.getLogger(__name__)
 
@@ -246,7 +247,7 @@ class InContextLearningMetric(Metric):
     ):
         """Abstract interface for computing an in-context learning metrics.
 
-        The `output_logits` argument is deprecated and will be removed in v0.21 while it's functionality will
+        The `output_logits` argument is deprecated and will be removed in v0.22 while it's functionality will
         be moved to `outputs`.
 
         Args:
@@ -254,6 +255,7 @@ class InContextLearningMetric(Metric):
                 to compute the metric.
             output_logits (torch.Tensor): The model outputs evaluated on the batch `input_ids`
             labels (torch.Tensor): The correct outputs.
+            outputs (torch.Tensor): The model outputs evaluated on the batch `input_ids`.
 
         Raises:
             NotImplementedError: Abstract method must be implemented by subclasses
@@ -271,8 +273,7 @@ class InContextLearningMetric(Metric):
             raise ValueError('Cannot use both `outputs` and `output_logits`')
         if output_logits is not None:
             warnings.warn(
-                ('`output_logits` has been renamed to `outputs` and will be removed in v0.21'),
-                DeprecationWarning,
+                VersionedDeprecationWarning('`output_logits` has been renamed to `outputs`.', remove_version='0.21.0'),
             )
             outputs = output_logits
 
