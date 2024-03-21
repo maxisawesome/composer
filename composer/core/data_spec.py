@@ -7,7 +7,6 @@ from __future__ import annotations
 import collections.abc
 import textwrap
 import warnings
-import logging
 from typing import TYPE_CHECKING, Any, Callable, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 import torch
@@ -21,7 +20,6 @@ if TYPE_CHECKING:
 
 __all__ = ['DataSpec', 'ensure_data_spec']
 
-log = logging.getLogger(__name__)
 
 def _split_list(l, microbatch_size: int):
     if len(l) < microbatch_size:
@@ -66,11 +64,7 @@ def _split_mapping(m, microbatch_size: int):
     for k, v in m.items():
         if isinstance(v, (int, float, str, bool)):
             chunked[k] = [v] * num_chunks
-    try:
-        return [{k: v[idx] for k, v in chunked.items()} for idx in range(num_chunks)]
-    except:
-        log.info(chunked)
-        raise Exception(f'Error in splitting mapping. Found chunked: {chunked}')
+    return [{k: v[idx] for k, v in chunked.items()} for idx in range(num_chunks)]
 
 
 def _check_list_is_primitives(l):
