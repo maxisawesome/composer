@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 
 __all__ = ['DataSpec', 'ensure_data_spec']
 
+import logging
+
+log = logging.getLogger(__name__)
+
 
 def _split_list(l, microbatch_size: int):
     if len(l) < microbatch_size:
@@ -218,11 +222,14 @@ class DataSpec:
             world_size = dist.get_world_size()
             # Check for Distributed Sampler if not using IterableDataset on more than 1 GPU
             if world_size > 1 and not isinstance(dataloader.dataset, torch.utils.data.IterableDataset):
+                log.info(f"Dataloader datasets type: {type(dataloader.dataset)}")
                 is_sampler_distributed = dataloader.sampler and isinstance(dataloader.sampler, DistributedSampler)
+                log.info(f"Dataloader sampler type: {type(dataloader.sampler)}")
                 is_batch_sampler_distributed = dataloader.batch_sampler is not None and isinstance(
                     dataloader.batch_sampler,
                     DistributedSampler,
                 )
+                log.info(f"Dataloader batch_sampler type: {type(dataloader.batch_sampler)}")
                 if not is_sampler_distributed and not is_batch_sampler_distributed:
                     raise ValueError(
                         f'The world_size({world_size}) > 1 but dataloader does not use '
