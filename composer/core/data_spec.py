@@ -239,9 +239,6 @@ class DataSpec:
                         'composer.utils.dist.instantiate_dist(...) and DistributedSampler can '
                         'directly be created with DataLoader(..., sampler=DistributedSampler(...)). '
                         'For more information, see https://pytorch.org/docs/stable/data.html#torch.utils.data.distributed.DistributedSampler.'
-                        f' Dataloader batch_sampler type: {type(dataloader.batch_sampler)}'
-                        f' Dataloader sampler type: {type(dataloader.sampler)}'
-                        f' Dataloader datasets type: {type(dataloader.dataset)}',
                     )
 
     def _default_device_transforms(self, batch: Batch):
